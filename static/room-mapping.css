@@ -1,0 +1,57 @@
+[hidden] { display: none !important; }
+.room-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--line); }
+.room-toolbar strong { font:600 12px var(--mono); margin-right:auto; }
+.room-toolbar button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); background:#142a38; }
+#room-viewport { position:relative; flex:1; min-height:180px; }
+#room-canvas { position:absolute; display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+#room-canvas:active { cursor:grabbing; }
+.room-overlay { position:absolute; left:16px; top:14px; pointer-events:none; display:flex; flex-direction:column; gap:6px; }
+.room-overlay .badge { align-self:flex-start; background:#0b1723e6; white-space:normal; }
+.room-hint { position:absolute; bottom:12px; left:16px; right:12px; display:flex; gap:8px; align-items:center; color:#7895a7; font:10px var(--mono); }
+.room-hint span { flex:1; pointer-events:none; }
+#room-fit { padding:5px 8px; }
+#stage { min-height:280px; }
+#room-dialog { color:var(--fg); background:var(--panel); border:1px solid #315064; border-radius:12px; padding:0; width:min(1180px,96vw); max-height:94dvh; }
+#room-dialog::backdrop { background:#030811cf; backdrop-filter:blur(5px); }
+.capture-heading { padding:20px 24px; border-bottom:1px solid var(--line); display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.capture-heading h2 { margin:0; font-size:22px; letter-spacing:-.03em; }
+.capture-heading p { margin:5px 0 0; color:var(--dim); }
+.capture-layout { display:grid; grid-template-columns:1.1fr 1fr; }
+#capture-form { padding:0 24px 24px; }
+#capture-form section { padding:18px 0; border-bottom:1px solid var(--line); }
+#capture-form h3 { color:#8cd6e4; font:600 12px var(--mono); margin:0 0 12px; }
+#capture-form p, .capture-preview-panel p { color:var(--dim); font-size:12px; line-height:1.6; }
+#capture-form label { display:flex; flex-direction:column; gap:5px; color:var(--dim); font:11px var(--mono); }
+.capture-fields { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+.capture-height { margin-top:14px; }
+.capture-object { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; padding:10px 0; }
+.capture-object select { width:125px; }
+.capture-object input[type=number] { width:70px; }
+#capture-status { color:#92d5e4 !important; padding:12px; background:#10242f; border-left:2px solid #52bad0; }
+#capture-apply { width:100%; padding:14px; font-size:12px; background:#13313d; }
+#capture-video { width:100%; max-height:230px; object-fit:contain; background:#000; margin-top:12px; border-radius:8px; }
+.capture-preview-panel { padding:20px; background:#0b131d; border-left:1px solid var(--line); position:sticky; top:0; align-self:start; }
+#capture-preview { width:100%; height:340px; touch-action:none; cursor:grab; border-radius:8px; }
+#capture-empty { height:340px; display:flex; justify-content:center; flex-direction:column; align-items:center; text-align:center; border:1px dashed #294454; border-radius:8px; padding:30px; margin-bottom:16px; }
+#capture-summary { display:block; color:#8cd6e4; font:12px var(--mono); margin-top:14px; }
+#capture-outline { font-family:var(--mono); overflow-wrap:anywhere; }
+#ar-overlay { position:fixed; inset:0; color:white; font:14px system-ui,sans-serif; pointer-events:none; }
+.ar-top { padding:20px; background:linear-gradient(#07151ce8, #07151c99); }
+.ar-top span { float:right; }
+.ar-top p { margin:8px 0 0; }
+.ar-bottom { position:absolute; bottom:30px; width:100%; display:flex; gap:8px; justify-content:center; }
+.ar-bottom button { pointer-events:auto; min-height:48px; padding:12px; background:#102a36ed; color:white; font-size:13px; border:1px solid #6badb9; }
+.ar-bottom button.primary { background:#135940ed; border-color:#42ee9d; }
+@media (max-width:850px) {
+  .capture-layout { grid-template-columns:1fr; }
+  .capture-preview-panel { position:static; border-left:0; border-top:1px solid var(--line); }
+  .capture-heading { padding:16px; }
+  #capture-form { padding:0 16px 20px; }
+}
+@media (max-width:1140px), (max-height:780px) {
+  #room-viewport { min-height:350px; }
+}
+@media (max-width:600px) {
+  .room-toolbar strong { width:100%; }
+  .tag { display:none; }
+}

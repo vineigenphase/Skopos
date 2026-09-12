@@ -18,6 +18,44 @@ open http://127.0.0.1:8077
 
 No API keys, no network, no npm. `python selftest.py` checks every claim below.
 
+## Live 3D room demo
+
+The homepage opens with an orbitable 3D view. **Map my room** replaces the sample
+with geometry from your device, then runs a campaign using the objects you placed:
+
+1. **AR floor capture:** open the app over HTTPS on a browser/device supporting
+   WebXR immersive AR, hit testing and DOM overlays (for example, a compatible
+   Android phone with Chrome). Grant AR permission, point the green ring at each
+   floor corner in order, and press **Place corner**. Finish after at least three
+   corners. Tracking estimates the floor outline; this is not automatic mesh
+   reconstruction or furniture detection. WebXR availability is checked on-device.
+2. **Entered measurements:** if AR is unavailable, enter the rectangular room's
+   width and depth, then press **Set floor**. An optional local camera preview is
+   a visual reference only; it does not estimate depth.
+3. Enter ceiling height, robot start, mug target, and furniture coordinates.
+   Press **Use this room in the live demo**. Connected viewers update as well,
+   so a phone can supply the room displayed in another browser.
+
+Sample, manually entered, and AR-estimated rooms have distinct labels. Ceiling
+height is entered (default 2.5 m); object heights are illustrative. Walls are
+visual guides and are **not** collision geometry in the surrogate. Furniture is
+scored using its circular footprint. The engine is unchanged.
+
+Camera images stay in the capturing browser; only validated geometry crosses
+the WebSocket. Closing the mapper stops the camera. Camera and AR permissions
+may be blocked by embedded browsers: open the HTTPS app in a regular browser
+tab when needed. Desktop webcams and browsers without WebXR cannot perform the
+AR capture. Physical device accuracy still needs validation in a real room.
+
+This remains a single shared demo: applying a room changes it for everyone
+connected to this server. Room geometry lives in server memory; recording a
+demo explicitly persists structured events through the existing recorder.
+Use **Reset to sample** to return to the original scene.
+
+Run `make test` for the engine and room-import tests. `make test-js` runs the
+AR-coordinate/geometry tests with Node 18+ (Node is only needed for these tests,
+not to serve the app).
+
 ## Architecture in five bullets
 
 - **`engine.py`** is the sampling engine and a **fixed dependency** — scene
@@ -32,8 +70,8 @@ No API keys, no network, no npm. `python selftest.py` checks every claim below.
   next to every estimate.
 - **`bandit.py`** is a contextual bandit (LinUCB) over four task strategies,
   adapting online as the room changes.
-- **`app.py`** is FastAPI + one WebSocket; **`static/index.html`** is the entire
-  front end — vanilla JS, no build step, no external requests. A second page,
+- **`app.py`** is FastAPI + one WebSocket; **`static/index.html`** and the local
+  room capture/view scripts are vanilla JS, no build step, no external requests. A second page,
   **`/internals`**, shows the machinery itself.
 
 ```
@@ -65,8 +103,10 @@ scan ──▶ SceneGraph ──┬──▶ surrogate ──▶ campaign ──
    against the public docs at <https://docs.reactor.inc>, read at build time.
    Facts from the docs are marked `[docs]` in the source; every inference is
    marked `TODO(reactor)`. Its `health()` says so out loud.
-5. **The demo room is hand-written**, not scanned. `DEMO_ROOM` in `engine.py` is
-   six objects a human typed in. No vision model ran.
+5. **The initial demo room is hand-written**, not scanned. `DEMO_ROOM` in
+   `engine.py` is six objects a human typed in. **Map my room** can replace it
+   with AR-estimated floor corners or entered dimensions; objects are manually
+   placed. No vision model runs.
 6. **The readiness thresholds are a judgement call**, not a result:
    READY ≥ 85, MARGINAL ≥ 60. `readiness = 100 × (1 − P(failure))`.
 7. **The archetype priors are assumptions**, not measurements of real homes.

@@ -21,20 +21,21 @@ from engine import Item, SceneGraph
 from .base import Frame, RenderRequest, WorldModelProvider
 
 W, H = 720, 480
-# Room extent in metres, mapped into the canvas. DEMO_ROOM lives in roughly
-# x in [0, 3], y in [0, 2.5], with the robot at the origin.
 XMIN, XMAX = -0.45, 3.45
 YMIN, YMAX = -0.45, 2.60
+Bounds = Tuple[float, float, float, float]
 
 
-def _to_px(x: float, y: float) -> Tuple[float, float]:
-    px = (x - XMIN) / (XMAX - XMIN) * W
-    py = H - (y - YMIN) / (YMAX - YMIN) * H
+def _to_px(x: float, y: float, bounds: Bounds) -> Tuple[float, float]:
+    xmin, xmax, ymin, ymax = bounds
+    px = (x - xmin) / (xmax - xmin) * W
+    py = H - (y - ymin) / (ymax - ymin) * H
     return px, py
 
 
-def _scale() -> float:
-    return W / (XMAX - XMIN)
+def _scale(bounds: Bounds) -> float:
+    xmin, xmax, ymin, ymax = bounds
+    return min(W / (xmax - xmin), H / (ymax - ymin))
 
 
 def degradation(severity: float) -> dict:
@@ -57,10 +58,10 @@ def degradation(severity: float) -> dict:
     }
 
 
-def _item_svg(it: Item, culprit: bool) -> str:
-    s = _scale()
+def _item_svg(it: Item, culprit: bool, bounds: Bounds) -> str:
+    s = _scale(bounds)
     r = max(it.radius * s, 5)
-    px, py = _to_px(it.x, it.y)
+    px, py = _to_px(it.x, it.y, bounds)
     if it.reflective:
         fill, stroke = "#2e4a55", "#6fd4e8"
     elif it.low_contrast:
@@ -81,6 +82,12 @@ def _item_svg(it: Item, culprit: bool) -> str:
 
 
 def _svg(sg: SceneGraph, req: RenderRequest, deg: dict) -> str:
+    bounds = (
+        min(XMIN, sg.robot[0] - 0.45, *(it.x - it.radius - 0.45 for it in sg.items)),
+        max(XMAX, sg.robot[0] + 0.45, *(it.x + it.radius + 0.45 for it in sg.items)),
+        min(YMIN, sg.robot[1] - 0.45, *(it.y - it.radius - 0.45 for it in sg.items)),
+        max(YMAX, sg.robot[1] + 0.45, *(it.y + it.radius + 0.45 for it in sg.items)),
+    )
     p: List[str] = []
     p.append('<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" '
              'viewBox="0 0 {} {}">'.format(W, H, W, H))
@@ -107,14 +114,14 @@ def _svg(sg: SceneGraph, req: RenderRequest, deg: dict) -> str:
              'stroke="#242a33"/>'.format(W - 12, H - 12))
 
     # half-metre grid
-    x = 0.0
-    while x <= 3.5:
-        px, _ = _to_px(x, 0.0)
+    x = math.ceil(bounds[0] * 2) / 2
+    while x <= bounds[1]:
+        px, _ = _to_px(x, 0.0, bounds)
         p.append('<line x1="{:.0f}" y1="6" x2="{:.0f}" y2="{}" stroke="#1e242c"/>'.format(px, px, H - 6))
         x += 0.5
-    y = 0.0
-    while y <= 2.5:
-        _, py = _to_px(0.0, y)
+    y = math.ceil(bounds[2] * 2) / 2
+    while y <= bounds[3]:
+        _, py = _to_px(0.0, y, bounds)
         p.append('<line x1="6" y1="{:.0f}" x2="{}" y2="{:.0f}" stroke="#1e242c"/>'.format(py, W - 6, py))
         y += 0.5
 
@@ -124,14 +131,14 @@ def _svg(sg: SceneGraph, req: RenderRequest, deg: dict) -> str:
             a = 2.399963 * i           # golden-angle scatter, deterministic
             cx = 1.6 + 1.25 * math.cos(a) * ((i % 5) + 1) / 5.0
             cy = 1.2 + 1.05 * math.sin(a) * ((i % 4) + 1) / 4.0
-            qx, qy = _to_px(cx, cy)
+            qx, qy = _to_px(cx, cy, bounds)
             p.append('<circle cx="{:.0f}" cy="{:.0f}" r="9" fill="none" stroke="#6f7684" '
                      'stroke-dasharray="3 3" stroke-width="1.2"/>'.format(qx, qy))
 
     target = sg.get(sg.target)
-    rx, ry = _to_px(*sg.robot)
+    rx, ry = _to_px(*sg.robot, bounds)
     if target is not None:
-        tx, ty = _to_px(target.x, target.y)
+        tx, ty = _to_px(target.x, target.y, bounds)
         colour = {"fail": "#e0574a", "success": "#3ddc97"}.get(req.status, "#4aa8e0")
         p.append('<line x1="{:.1f}" y1="{:.1f}" x2="{:.1f}" y2="{:.1f}" stroke="{}" '
                  'stroke-width="2" stroke-opacity="0.75" stroke-dasharray="6 4"/>'.format(
@@ -140,14 +147,14 @@ def _svg(sg: SceneGraph, req: RenderRequest, deg: dict) -> str:
     for it in sg.items:
         if not it.present:
             continue
-        p.append(_item_svg(it, culprit=(req.culprit == it.name)))
+        p.append(_item_svg(it, culprit=(req.culprit == it.name), bounds=bounds))
 
     # missing objects, shown as an outline where they used to be
     for it in sg.items:
         if it.present:
             continue
-        px, py = _to_px(it.x, it.y)
-        r = max(it.radius * _scale(), 5)
+        px, py = _to_px(it.x, it.y, bounds)
+        r = max(it.radius * _scale(bounds), 5)
         p.append('<circle cx="{:.1f}" cy="{:.1f}" r="{:.1f}" fill="none" stroke="#e0574a" '
                  'stroke-width="1.4" stroke-dasharray="4 4"/>'.format(px, py, r))
         p.append('<text x="{:.1f}" y="{:.1f}" font-size="10" fill="#e0574a" '
