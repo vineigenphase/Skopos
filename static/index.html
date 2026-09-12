@@ -381,7 +381,11 @@ function handle(m){
 
 function setBusy(on, samples){
   busy = on;
-  $("btn-run").disabled = on;
+  $("btn-run").disabled = on || replaying;
+  // A replay streams recorded campaign events, so it would otherwise hand the
+  // header and the controls back mid-playback. The replay owns both until it
+  // says it is over.
+  if(replaying) return;
   $("b-conn").textContent = on ? ("sampling " + (samples || 0).toLocaleString() + "…") : "connected";
   $("b-conn").className = on ? "badge busy" : "badge live";
 }
@@ -407,14 +411,9 @@ function renderState(s){
   }
   sel.value = s.strategy;
 
-  if(s.privacy) drawPrivacy(s.privacy);
-  if(s.cem) onCem(s.cem);
-  if(s.scene){
-    $("payload").textContent = JSON.stringify(s.scene, null, 2);
-    syncItemControls(s.scene);
-  }
-  if(s.bandit) drawArms(s.bandit);
-
+  // The archetype options are built before anything that appends to the same
+  // select: onCem adds the adversarial option, and a non-empty list is what
+  // guards this block.
   const asel = $("in-archetype");
   if(!asel.options.length){
     const none = document.createElement("option");
@@ -426,6 +425,15 @@ function renderState(s){
       asel.appendChild(o);
     });
   }
+
+  if(s.privacy) drawPrivacy(s.privacy);
+  if(s.cem) onCem(s.cem);
+  if(s.scene){
+    $("payload").textContent = JSON.stringify(s.scene, null, 2);
+    syncItemControls(s.scene);
+  }
+  if(s.bandit) drawArms(s.bandit);
+
   if(Array.prototype.some.call(asel.options, o => o.value === (s.archetype || "")))
     asel.value = s.archetype || "";
   if(s.report) drawReport(s.report);
