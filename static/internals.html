@@ -152,8 +152,9 @@
 
 <div class="panel wide">
   <h2>contextual bandit <span class="sub">— the linear model behind the bars</span></h2>
-  <div class="body">
+  <div class="body" id="bandit-body">
     <div class="chiprow" id="ctx-chips"></div>
+    <button id="drive" style="margin:0 0 8px">Drive 200 pulls</button>
     <div class="grid4" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
       <div>
         <canvas id="c-ucb" height="170"></canvas>
@@ -498,6 +499,13 @@ function drawWeightsTable(W){
 
 // -------------------------------------------------------------------- bandit
 function drawBandit(B){
+  if(!B){
+    $("bandit-body").innerHTML =
+      '<div class="empty">bandit not running — open <a href="/">the demo page</a>, '
+      + 'which drives the arms over the WebSocket</div>';
+    $("main").dataset.built = "";   // rebuild the panel once it is back
+    return;
+  }
   $("ctx-chips").innerHTML = B.features.map((f, i) =>
     '<span class="chip">' + f + " <b style='color:var(--accent)'>"
     + B.context[i].toFixed(2) + "</b></span>").join("")
@@ -527,7 +535,12 @@ function drawBandit(B){
     $("n-ucb").innerHTML =
       "LinUCB picks the longest bar. The faint segment is the exploration bonus — it "
       + "shrinks as an arm is pulled, which is why a barely-tried arm still gets a turn. "
-      + "This is the one-step case of RL: one decision, one reward, no state transition.";
+      + "This is the one-step case of RL: one decision, one reward, no state transition."
+      + (B.t === 0
+         ? " <b>No pulls yet</b>: this is the model at its prior, every arm identical "
+           + "and all of the bar exploration bonus. Drive it from the button above, "
+           + "or from the demo page."
+         : "");
   }
 
   // theta heat bars
@@ -670,7 +683,7 @@ function render(d){
   drawScatter(d.monte_carlo, d.scene);
   drawAxesPanel(d.monte_carlo);
   drawLogW(d.weights); drawESS(d.weights); drawWeightsTable(d.weights);
-  if(d.bandit) drawBandit(d.bandit);
+  drawBandit(d.bandit);
   drawCem(d.cem);
 }
 
@@ -683,6 +696,15 @@ async function load(){
   }
 }
 $("btn-refresh").onclick = load;
+// the panels live in a template, so the button is bound by delegation
+document.addEventListener("click", async (ev) => {
+  const b = ev.target.closest && ev.target.closest("#drive");
+  if(!b) return;
+  b.disabled = true;
+  try{ await fetch("/api/bandit/step?n=200", {method: "POST"}); await load(); }
+  finally{ b.disabled = false; }
+});
+
 let rt; window.addEventListener("resize", () => {
   clearTimeout(rt); rt = setTimeout(() => { if(DATA) render(DATA); }, 150);
 });

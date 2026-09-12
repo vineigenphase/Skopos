@@ -516,11 +516,48 @@ async def internals_page() -> FileResponse:
 
 
 @app.get("/api/internals")
-async def api_internals() -> JSONResponse:
-    """Everything under the surface, shaped for plotting. Read-only."""
+async def api_internals(bootstrap: bool = True) -> JSONResponse:
+    """Everything under the surface, shaped for plotting.
+
+    The engine room stands on its own: opened cold, with `bootstrap` on, it runs
+    the default campaign itself rather than showing empty panels, and puts the
+    bandit's model on screen at its prior. Both are the same code paths the demo
+    page drives; nothing here computes a number of its own.
+    """
     import internals
-    data = await asyncio.to_thread(internals.snapshot, DEMO)
-    return JSONResponse(data)
+
+    def build() -> Dict[str, Any]:
+        bootstrapped = False
+        if bootstrap and DEMO.campaign is None:
+            DEMO.run_campaign()
+            bootstrapped = True
+        if bootstrap and DEMO.cem is None:
+            DEMO.run_cem()   # 400 x 5 surrogate calls, well under a second
+            bootstrapped = True
+        DEMO.ensure_bandit()
+        data = internals.snapshot(DEMO)
+        data["bootstrapped"] = bootstrapped
+        return data
+
+    return JSONResponse(await asyncio.to_thread(build))
+
+
+@app.post("/api/bandit/step")
+async def api_bandit_step(n: int = 200) -> JSONResponse:
+    """Drive the bandit n pulls, so the engine room can show it moving on its own.
+
+    Identical to what the WebSocket loop does per frame; a pull is a handful of
+    5x5 matrix operations plus one surrogate call.
+    """
+    n = max(1, min(n, 5000))
+    ob = DEMO.ensure_bandit()
+
+    def drive() -> None:
+        for _ in range(n):
+            ob.step()
+
+    await asyncio.to_thread(drive)
+    return JSONResponse({"pulls": ob.model.t})
 
 
 @app.get("/api/scene")
