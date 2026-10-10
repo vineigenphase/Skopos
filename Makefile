@@ -8,9 +8,14 @@ install:
 
 test:
 	python selftest.py
+	python -m unittest discover -s tests
+
+.PHONY: test-js
+test-js:
+	node --test tests/room-geometry.test.js
 
 check:
-	python -m compileall -q app.py bandit.py privacy.py recorder.py selftest.py providers
+	python -m compileall -q app.py bandit.py privacy.py recorder.py room_mapping.py selftest.py providers
 
 clean:
 	rm -rf runs/run-* __pycache__ providers/__pycache__

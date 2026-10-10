@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Skopos — pre-deployment readiness for home robots</title>
+<link rel="stylesheet" href="/static/room-mapping.css">
 <style>
   :root{
     --bg:#0b0d11; --panel:#12161d; --panel2:#161b24; --line:#222a35;
@@ -164,8 +165,21 @@
 <main>
   <div class="col-left">
     <div class="panel">
-      <h2>room render <span class="sub" id="render-sub">&mdash; the worst 12 of the campaign, the only ones worth a world-model call</span></h2>
-      <div id="stage"><div class="empty">run a campaign to render the room</div></div>
+      <div class="room-toolbar">
+        <strong>YOUR ROOM / SPATIAL VIEW</strong>
+        <button id="show-3d" aria-pressed="true">3D room</button>
+        <button id="show-render" aria-pressed="false">Provider render</button>
+        <button id="map-room" class="primary">Map my room</button>
+      </div>
+      <div id="room-viewport">
+        <canvas id="room-canvas" tabindex="0" aria-label="Interactive 3D room. Drag or use arrow keys to orbit, scroll or use plus and minus to zoom."></canvas>
+        <div class="room-overlay">
+          <span class="badge" id="room-source">SAMPLE ROOM · not your surroundings</span>
+          <span class="badge" id="room-metrics">Waiting for scene…</span>
+        </div>
+        <div class="room-hint"><span>Drag to orbit · scroll to zoom · object heights are illustrative</span><button id="room-fit">Reset view</button></div>
+      </div>
+      <div id="stage" hidden><div class="empty">Run a campaign to see provider frames</div></div>
       <div class="stagebar">
         <span id="s-strategy">strategy &mdash;</span>
         <span id="s-sev">severity &mdash;</span>
@@ -244,7 +258,7 @@
           </div>
           <div class="btnrow" style="margin-top:4px">
             <button id="btn-clear" class="primary">Clear the worst hazard</button>
-            <button id="btn-reset-room">Reset room</button>
+            <button id="btn-reset-room">Reset to sample</button>
           </div>
           <div class="note" style="margin-top:7px">
             Releasing a slider re-measures. The bandit keeps its estimates: arm
@@ -333,11 +347,105 @@
 </div>
 <div id="toast"></div>
 
+<dialog id="room-dialog" aria-labelledby="capture-title">
+  <div class="capture-heading">
+    <div><h2 id="capture-title">Map the room you’re in</h2><p>Build a floor outline, place your objects, then run it in Skopos.</p></div>
+    <button id="capture-close" type="button" aria-label="Close room mapping">Close</button>
+  </div>
+  <div class="capture-layout">
+    <form id="capture-form">
+      <section>
+        <h3>01 / Capture your floor</h3>
+        <div class="btnrow">
+          <button type="button" class="primary" id="capture-ar" disabled>Start AR floor capture</button>
+          <button type="button" id="capture-camera">Open camera reference</button>
+        </div>
+        <p id="capture-capability">Checking device capabilities…</p>
+        <video id="capture-video" autoplay muted playsinline hidden></video>
+        <p>Or enter a rectangular floor you measured:</p>
+        <div class="capture-fields">
+          <label>Width (m)<input type="number" id="capture-width" min="1" max="30" step="0.01"></label>
+          <label>Depth (m)<input type="number" id="capture-depth" min="1" max="30" step="0.01"></label>
+          <button type="button" id="capture-dimensions">Set floor</button>
+        </div>
+        <label class="capture-height">Ceiling height (m, entered)<input type="number" id="capture-height" min="1" max="6" step="0.01" value="2.5" required></label>
+        <p>Default ceiling height is 2.5 m; check yours. AR measures floor corners only. Walls and object heights are visual guides; the campaign scores object positions.</p>
+      </section>
+      <section>
+        <h3>02 / Place the fetch task</h3>
+        <p>Enter floor coordinates from the outline at right. These positions are manually placed, including after an AR capture.</p>
+        <div class="capture-fields">
+          <label>Robot X (m)<input type="number" id="robot-x" min="0" max="30" step="0.01" required></label>
+          <label>Robot Y (m)<input type="number" id="robot-y" min="0" max="30" step="0.01" required></label>
+          <label>Mug X (m)<input type="number" id="target-x" min="0" max="30" step="0.01" required></label>
+          <label>Mug Y (m)<input type="number" id="target-y" min="0" max="30" step="0.01" required></label>
+        </div>
+      </section>
+      <section>
+        <h3>03 / Add furniture</h3>
+        <p>Objects are approximate blocks in 3D and circular footprints for scoring. Radius is half the object’s footprint width.</p>
+        <div id="capture-objects"></div>
+        <button type="button" id="capture-add">Add an object</button>
+      </section>
+      <p id="capture-status" role="status" aria-live="polite"></p>
+      <button type="submit" id="capture-apply" class="primary">Use this room in the live demo</button>
+    </form>
+    <div class="capture-preview-panel">
+      <div id="capture-empty"><strong>Your room will appear here</strong><p>Capture floor corners with AR or enter measurements to start.</p></div>
+      <canvas id="capture-preview" tabindex="0" aria-label="Draft room in 3D. Drag to orbit." hidden></canvas>
+      <strong id="capture-summary">No room captured yet</strong>
+      <p id="capture-outline"></p>
+      <p>Coordinates in metres · drag to orbit<br>Only geometry is shared with Skopos. Camera images stay on your device.</p>
+    </div>
+  </div>
+</dialog>
+<div id="ar-overlay" hidden>
+  <div class="ar-top"><strong>SKOPOS / FLOOR CAPTURE</strong><span id="ar-count">0 / 32 corners</span>
+    <p id="ar-status">Move slowly and point down at the floor.</p>
+    <p>Place each floor corner in order around the room. Do not place the first corner twice.</p>
+  </div>
+  <div class="ar-bottom">
+    <button id="ar-undo" disabled>Undo corner</button>
+    <button id="ar-place" class="primary" disabled>Place corner</button>
+    <button id="ar-finish">Exit AR</button>
+  </div>
+</div>
+<script src="/static/room-view.js"></script>
+<script src="/static/room-geometry.js"></script>
+<script src="/static/room-capture.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 let ws = null, state = null, busy = false, lastReport = null, lastCem = null;
 let recording = false, replaying = false;
+const roomView = new RoomView($("room-canvas"));
+const roomCapture = new RoomCaptureUI({
+  getState: () => state,
+  show3d: () => showRoomView(true),
+  submit: room => {
+    if(!ws || ws.readyState !== 1 || replaying || busy) return false;
+    send({type: "set_room", room});
+    return true;
+  }
+});
+function showRoomView(on){
+  $("room-viewport").hidden = !on;
+  $("stage").hidden = on;
+  $("show-3d").setAttribute("aria-pressed", String(on));
+  $("show-render").setAttribute("aria-pressed", String(!on));
+  roomView.draw();
+}
+$("show-3d").onclick = () => showRoomView(true);
+$("show-render").onclick = () => showRoomView(false);
+$("room-fit").onclick = () => roomView.reset();
+function updateRoomView(scene, room){
+  roomView.update(scene, room);
+  $("room-source").textContent = room
+    ? (room.source === "webxr" ? "AR FLOOR CAPTURE · device-estimated" : "YOUR ROOM · entered measurements")
+    : "SAMPLE ROOM · not your surroundings";
+  $("room-metrics").textContent = scene.items.length + " objects · " +
+    (room ? room.floor.length + " corners · height " + room.height.toFixed(2) + " m (entered)" : "illustrative dimensions");
+}
 
 function toast(t){
   const el = $("toast"); el.textContent = t; el.classList.add("on");
@@ -351,6 +459,7 @@ function connect(){
   ws = new WebSocket(proto + "://" + location.host + "/ws");
   ws.onopen = () => { $("b-conn").textContent = "connected"; $("b-conn").className = "badge live"; };
   ws.onclose = () => {
+    if(roomCapture.pending) roomCapture.received("Connection lost before confirmation. Reconnect and check the room before trying again.");
     $("b-conn").textContent = "disconnected"; $("b-conn").className = "badge";
     setTimeout(connect, 1200);
   };
@@ -368,6 +477,8 @@ function handle(m){
     case "rescored": onRescored(m); break;
     case "campaign_progress": onProgress(m); break;
     case "scene_changed": onSceneChanged(m); break;
+    case "room_saved": roomCapture.received(); break;
+    case "room_error": roomCapture.received(m.text); break;
     case "cem_start": $("cem-note").textContent = "searching\u2026"; break;
     case "cem_done": onCem(m.cem); break;
     case "elite_start": onEliteStart(m); break;
@@ -382,6 +493,7 @@ function handle(m){
 function setBusy(on, samples){
   busy = on;
   $("btn-run").disabled = on;
+  $("map-room").disabled = on || replaying;
   $("b-conn").textContent = on ? ("sampling " + (samples || 0).toLocaleString() + "…") : "connected";
   $("b-conn").className = on ? "badge busy" : "badge live";
 }
@@ -410,8 +522,9 @@ function renderState(s){
   if(s.privacy) drawPrivacy(s.privacy);
   if(s.cem) onCem(s.cem);
   if(s.scene){
-    $("payload").textContent = JSON.stringify(s.scene, null, 2);
+    $("payload").textContent = JSON.stringify({...s.scene, ...(s.room ? {room:s.room} : {})}, null, 2);
     syncItemControls(s.scene);
+    updateRoomView(s.scene, s.room);
   }
   if(s.bandit) drawArms(s.bandit);
 
@@ -429,6 +542,17 @@ function renderState(s){
   if(Array.prototype.some.call(asel.options, o => o.value === (s.archetype || "")))
     asel.value = s.archetype || "";
   if(s.report) drawReport(s.report);
+  else {
+    lastReport = null;
+    setHeadline(null, null, "Run a campaign for this room");
+    $("r-score").textContent = "—";
+    $("r-state").textContent = "AWAITING CAMPAIGN";
+    $("m-pfail").textContent = "—";
+    $("m-fails").textContent = "—";
+    $("haz").querySelector("tbody").replaceChildren();
+    $("arch").querySelector("tbody").replaceChildren();
+    $("arch-caption").textContent = "";
+  }
   drawSpark(s.history || []);
   $("m-runs").textContent = (s.history || []).length;
 }
@@ -449,7 +573,13 @@ function onSceneChanged(m){
   pay.classList.remove("flash"); void pay.offsetWidth; pay.classList.add("flash");
   if(m.privacy) drawPrivacy(m.privacy);
   if(state) state.scene = m.scene;
+  if(state) state.room = m.room;
+  if(state) {
+    state.report = null;
+    renderState(state);
+  }
   syncItemControls(m.scene);
+  updateRoomView(m.scene, m.room);
   if(m.what) toast(m.what);
 }
 
@@ -587,7 +717,7 @@ function onReplay(m){
   $("btn-replay").innerHTML = m.on ? "&#9632; Stop replay" : "&#9654; Replay";
   $("b-conn").textContent = m.on ? "REPLAY \u00b7 offline" : "connected";
   $("b-conn").className = m.on ? "badge rec" : "badge live";
-  [ "btn-run","btn-clear","btn-reset-room","btn-cem","btn-elite","btn-rec" ]
+  [ "btn-run","btn-clear","btn-reset-room","btn-cem","btn-elite","btn-rec","map-room" ]
     .forEach(id => { const b = $(id); if(b) b.disabled = m.on; });
 }
 
@@ -622,7 +752,9 @@ function onFrame(m){
   $("s-fid").textContent = "fidelity " + (meta.fidelity !== undefined ? meta.fidelity.toFixed(2) : "—");
   $("s-lat").textContent = "render " + m.frame.latency_ms.toFixed(1) + "ms";
   if(m.label) $("s-elite").textContent = m.label;
-  if(m.scene) $("payload").textContent = JSON.stringify(m.scene, null, 2);
+  if(m.scene && !$("stage").hidden) {
+    $("payload").textContent = JSON.stringify({...m.scene, ...(state?.room ? {room:state.room} : {})}, null, 2);
+  }
 }
 
 function drawPrivacy(p){
@@ -698,15 +830,22 @@ function drawArms(b){
 
 function syncItemControls(scene){
   const sel = $("in-item");
-  if(!sel.options.length){
+  const names = scene.items.map(it => it.name);
+  if(JSON.stringify([...sel.options].map(o => o.value)) !== JSON.stringify(names)){
+    const previous = sel.value;
+    sel.replaceChildren();
     scene.items.forEach(it => {
       const o = document.createElement("option");
       o.value = it.name;
       o.textContent = it.name.replace(/_/g, " ") + (it.movable ? "" : "  (fixed)");
       sel.appendChild(o);
     });
-    sel.value = "glass_table";
+    sel.value = names.includes(previous) ? previous : names.includes("glass_table") ? "glass_table" : names[0];
   }
+  $("in-x").min = state?.room ? Math.min(...state.room.floor.map(p => p[0])) : 0;
+  $("in-y").min = state?.room ? Math.min(...state.room.floor.map(p => p[1])) : 0;
+  $("in-x").max = state?.room ? Math.max(...state.room.floor.map(p => p[0])) : 3.4;
+  $("in-y").max = state?.room ? Math.max(...state.room.floor.map(p => p[1])) : 2.5;
   const it = scene.items.find(i => i.name === sel.value);
   if(it){
     $("in-x").value = it.x; $("v-x").textContent = it.x.toFixed(2);

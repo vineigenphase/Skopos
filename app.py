@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 import engine
 from engine import (
@@ -45,6 +46,7 @@ from bandit import OnlineBandit, _point_segment_distance
 from privacy import PrivacyLedger, startup_assertion
 from providers.base import RenderRequest, WorldModelProvider
 from recorder import Recorder, list_runs, replay_events
+from room_mapping import FloorPlan, RoomCapture
 
 log = logging.getLogger("skopos")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -232,6 +234,9 @@ class Demo:
     """Single-session run state. This is a demo, not a service."""
 
     scene: SceneGraph = DEMO_ROOM
+    room: Optional[FloorPlan] = None
+    revision: int = 0
+    operation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     strategy: str = "direct_approach"
     m: int = DEFAULT_M
     seed: int = DEFAULT_SEED
@@ -248,6 +253,8 @@ class Demo:
 
     def move_item(self, name: str, x: float, y: float) -> bool:
         """Move one object in the base scene graph. Frozen dataclasses, so rebuild."""
+        if self.room and not self.room.contains((float(x), float(y))):
+            return False
         items = []
         found = False
         for it in self.scene.items:
@@ -311,15 +318,17 @@ class Demo:
         # enough: the sofa and the lamp already occupy two of them.
         best = None
         best_d = -1.0
+        xmax = max(p[0] for p in self.room.floor) if self.room else 3.25
+        ymax = max(p[1] for p in self.room.floor) if self.room else 2.45
         y = 0.2
-        while y <= 2.45:
+        while y <= ymax:
             x = 0.2
-            while x <= 3.25:
+            while x <= xmax:
                 clear_of_others = all(
                     math.hypot(o.x - x, o.y - y) > (o.radius + r + 0.15)
                     for o in self.scene.items if o.name != worst
                 )
-                if clear_of_others:
+                if clear_of_others and (not self.room or self.room.contains((x, y), r)):
                     d = _point_segment_distance(x, y, rx, ry, tx, ty)
                     if d > best_d:
                         best_d, best = d, (x, y)
@@ -336,6 +345,7 @@ class Demo:
         return {"object": worst, "to": [round(best[0], 2), round(best[1], 2)]}
 
     def reset_scene(self) -> None:
+        self.room = None
         self.set_scene(DEMO_ROOM)
 
     def run_cem(self) -> Dict[str, Any]:
@@ -388,6 +398,9 @@ class Demo:
         value is a function of the room context, and the context is exactly what
         changed, so the estimates transfer and the bars re-order."""
         self.scene = scene
+        self.revision += 1
+        self.campaign = None
+        self.report = None
         if self.bandit is not None:
             self.bandit.set_scene(scene)
 
@@ -410,7 +423,10 @@ class Demo:
         return self.report
 
     def scene_payload(self) -> str:
-        payload = json.dumps(scene_to_dict(self.scene), indent=2)
+        data = scene_to_dict(self.scene)
+        if self.room:
+            data["room"] = self.room.model_dump()
+        payload = json.dumps(data, indent=2)
         self.ledger.note_payload(payload)
         return payload
 
@@ -436,6 +452,7 @@ class Demo:
     def state(self) -> Dict[str, Any]:
         return {
             "scene": scene_to_dict(self.scene),
+            "room": self.room.model_dump() if self.room else None,
             "strategies": list(STRATEGIES),
             "archetype_names": list(ARCHETYPES.keys()),
             "strategy": self.strategy,
@@ -469,13 +486,7 @@ async def _startup() -> None:
         log.warning("PRIVACY: %d reference image(s) uploaded to %s — pixels HAVE "
                     "left this device: %s", len(_h.get("reference_images") or []),
                     _h.get("provider"), _h.get("reference_images"))
-    # The scan step. Frames are counted and dropped; nothing is written to disk
-    # unless SKOPOS_DEBUG_KEEP_FRAMES=1, which is off by default and shouted
-    # about in startup_assertion() when it is not.
-    DEMO.ledger.note_frames(48)
-    log.info("scan: %d frames processed in memory, %d discarded, %d written to disk",
-             DEMO.ledger.frames_seen, DEMO.ledger.frames_discarded,
-             DEMO.ledger.frames_retained)
+    log.info("sample room loaded; no camera frames processed")
 
 
 @app.get("/")
@@ -504,8 +515,10 @@ async def api_campaign(
     if strategy not in STRATEGIES:
         return JSONResponse({"error": "unknown strategy", "strategies": list(STRATEGIES)},
                             status_code=400)
-    DEMO.m, DEMO.seed = max(100, min(m, 200_000)), seed
-    report = await asyncio.to_thread(DEMO.run_campaign, strategy)
+    async with DEMO.operation_lock:
+        DEMO.m, DEMO.seed = max(100, min(m, 200_000)), seed
+        report = await asyncio.to_thread(DEMO.run_campaign, strategy)
+        DEMO.revision += 1
     return JSONResponse(report)
 
 
@@ -548,6 +561,7 @@ class Loop:
         self.elite_task: Optional[asyncio.Task] = None
         self.recorder: Optional[Recorder] = None
         self.replaying = False
+        self.scene_revision = demo.revision
 
     async def send(self, msg: Dict[str, Any], record: bool = True) -> None:
         if self.closed:
@@ -558,6 +572,7 @@ class Loop:
 
     async def send_state(self) -> None:
         await self.send({"type": "state", **self.d.state()})
+        self.scene_revision = self.d.revision
 
     async def hello(self) -> None:
         await self.send({"type": "hello", "assertion": startup_assertion()})
@@ -574,6 +589,8 @@ class Loop:
         ob = self.d.ensure_bandit()
         try:
             while not self.closed:
+                if self.scene_revision != self.d.revision and not self.replaying:
+                    await self.send_state()
                 if self.bandit_on and not self.busy and not self.replaying:
                     last = None
                     for _ in range(BANDIT_TICKS_PER_FRAME):
@@ -625,6 +642,7 @@ class Loop:
                 campaign_report, camp, d.strategy, len(camp.thetas), d.seed)
             report["sample_ms"] = round(d.sample_ms, 1)
             d.report = report
+            d.revision += 1
             d.history.append(report["readiness"]["score"])
             if len(d.history) > 200:
                 d.history = d.history[-200:]
@@ -668,6 +686,7 @@ class Loop:
         await self.send({
             "type": "scene_changed",
             "scene": scene_to_dict(self.d.scene),
+            "room": self.d.room.model_dump() if self.d.room else None,
             "scene_payload": payload,
             "privacy": self.d.privacy_state(),
             "what": what,
@@ -720,7 +739,9 @@ class Loop:
             for rank, theta in enumerate(thetas):
                 if self.closed:
                     return
-                room = apply(self.d.scene, theta)
+                if self.d.campaign is not camp:
+                    break
+                room = apply(camp.scene, theta)
                 severity, culprit = surrogate(room, self.d.strategy)
                 frame = self.d.provider.render(room, RenderRequest(
                     seed=self.d.seed, step=rank, severity=severity, rank=rank,
@@ -792,11 +813,32 @@ class Loop:
             await self.run_campaign(strategy)
         elif t == "get_state":
             await self.send_state()
+        elif t == "set_room":
+            try:
+                capture = RoomCapture.model_validate(msg.get("room"))
+            except ValidationError as exc:
+                errors = exc.errors(include_input=False, include_url=False)
+                await self.send({"type": "room_error", "text": errors[0]["msg"]})
+                return
+            if self.elite_task is not None:
+                self.elite_task.cancel()
+            self.d.room = capture.plan()
+            self.d.set_scene(capture.scene())
+            self.d.cem = None
+            self.d.cem_prior = None
+            self.d.archetype = ""
+            self.d.history = []
+            await self.send({"type": "room_saved"})
+            await self.send_state()
+            await self.after_scene_change("Your room is now in the live demo", True)
         elif t == "move_item":
             name = str(msg.get("name", ""))
             if self.d.move_item(name, msg.get("x", 0.0), msg.get("y", 0.0)):
                 await self.after_scene_change("moved " + name.replace("_", " "),
                                               bool(msg.get("rerun", False)))
+            elif self.d.room:
+                await self.send({"type": "toast", "text": "Keep the object inside the captured floor outline."})
+                await self.send_state()
         elif t == "clear_hazard":
             moved = self.d.clear_top_hazard()
             if moved is None:
@@ -810,7 +852,7 @@ class Loop:
                     True)
         elif t == "reset_scene":
             self.d.reset_scene()
-            await self.after_scene_change("scene reset to the scanned room",
+            await self.after_scene_change("scene reset to the sample room",
                                           bool(msg.get("rerun", True)))
         elif t == "rescore":
             await self.rescore(msg.get("archetype", ""))
@@ -872,7 +914,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            await loop.handle(msg)
+            async with DEMO.operation_lock:
+                await loop.handle(msg)
     except WebSocketDisconnect:
         pass
     finally:
